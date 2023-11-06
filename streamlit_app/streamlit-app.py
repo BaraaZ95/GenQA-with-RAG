@@ -1,17 +1,18 @@
 import streamlit as st
 from streamlit_chat import message
 from langchain import OpenAI
+from classes import SPLADE
 
 # from langchain.chains import ConversationChain
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain import PromptTemplate
 from langchain import LLMChain
 import openai
-from transformers import AutoTokenizer, AutoModelForMaskedLM
 import torch
 import pinecone
 import os
 from dotenv import load_dotenv
+from fastapi import FastAPI
 
 load_dotenv("../.env")
 
@@ -30,6 +31,8 @@ pinecone.init(
 )
 # connect to index
 index = pinecone.Index(PINECONE_INDEX_NAME)
+
+app = FastAPI()
 
 
 @st.cache_resource
@@ -54,36 +57,6 @@ def LLM_chain_response():
         memory=ConversationSummaryBufferMemory(llm=llm, max_token_limit=256),
     )
     return chatgpt_chain
-
-
-# Define the Splade class
-class SPLADE:
-    def __init__(self, model):
-        # check device
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.tokenizer = AutoTokenizer.from_pretrained(model)
-        self.model = AutoModelForMaskedLM.from_pretrained(model)
-        # move to gpu if available
-        self.model.to(self.device)
-
-    def __call__(self, text: str):
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
-
-        with torch.no_grad():
-            logits = self.model(**inputs).logits
-
-        inter = torch.log1p(torch.relu(logits[0]))
-        token_max = torch.max(inter, dim=0)  # sum over input tokens
-        nz_tokens = torch.where(token_max.values > 0)[0]
-        nz_weights = token_max.values[nz_tokens]
-
-        order = torch.sort(nz_weights, descending=True)
-        nz_weights = nz_weights[order[1]]
-        nz_tokens = nz_tokens[order[1]]
-        return {
-            "indices": nz_tokens.cpu().numpy().tolist(),
-            "values": nz_weights.cpu().numpy().tolist(),
-        }
 
 
 # Instantiate the Splade class with the path to the model
